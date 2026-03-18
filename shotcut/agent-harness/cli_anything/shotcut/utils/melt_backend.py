@@ -43,6 +43,21 @@ def _validate_codec(value: str, allowed: frozenset, label: str) -> str:
     return value
 
 
+_BLOCKED_ARG_PREFIXES = ("vcodec=", "acodec=", "-consumer")
+
+
+def _validate_extra_args(extra_args: list) -> list:
+    """Reject extra_args that would bypass codec or consumer validation."""
+    for arg in extra_args:
+        for prefix in _BLOCKED_ARG_PREFIXES:
+            if arg.startswith(prefix):
+                raise ValueError(
+                    f"extra_args cannot override '{prefix.rstrip('=')}'. "
+                    f"Use the dedicated parameter instead."
+                )
+    return extra_args
+
+
 def find_melt() -> str:
     """Find the melt executable. Raises RuntimeError if not found."""
     path = shutil.which("melt")
@@ -117,6 +132,7 @@ def render_mlt(
     ]
 
     if extra_args:
+        _validate_extra_args(extra_args)
         cmd.extend(extra_args)
 
     result = subprocess.run(

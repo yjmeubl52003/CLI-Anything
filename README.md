@@ -638,12 +638,19 @@ Each application received complete, production-ready CLI interfaces — not demo
 <td align="center">✅ 98</td>
 </tr>
 <tr>
+<td align="center"><strong>🎨 Sketch</strong></td>
+<td>UI Design</td>
+<td><code>sketch-cli</code></td>
+<td>sketch-constructor (Node.js)</td>
+<td align="center">✅ 19</td>
+</tr>
+<tr>
 <td align="center" colspan="4"><strong>Total</strong></td>
-<td align="center"><strong>✅ 1,839</strong></td>
+<td align="center"><strong>✅ 1,858</strong></td>
 </tr>
 </table>
 
-> **100% pass rate** across all 1,839 tests — 1,355 unit tests + 484 end-to-end tests.
+> **100% pass rate** across all 1,858 tests — 1,355 unit tests + 484 end-to-end tests + 19 Node.js tests.
 
 ---
 
@@ -677,8 +684,9 @@ notebooklm     21 passed  ✅   (21 unit + 0 e2e)
 comfyui        70 passed  ✅   (60 unit + 10 e2e)
 adguardhome    36 passed  ✅   (24 unit + 12 e2e)
 ollama         98 passed  ✅   (87 unit + 11 e2e)
+sketch         19 passed  ✅   (19 jest, Node.js)
 ──────────────────────────────────────────────────────────────────────────────
-TOTAL        1,839 passed  ✅   100% pass rate
+TOTAL        1,858 passed  ✅   100% pass rate
 ```
 
 ---
@@ -744,7 +752,8 @@ cli-anything/
 ├── 🧠 notebooklm/agent-harness/         # NotebookLM CLI (experimental, 21 tests)
 ├── 🖼️ comfyui/agent-harness/            # ComfyUI CLI (70 tests)
 ├── 🛡️ adguardhome/agent-harness/       # AdGuard Home CLI (36 tests)
-└── 🦙 ollama/agent-harness/             # Ollama CLI (98 tests)
+├── 🦙 ollama/agent-harness/             # Ollama CLI (98 tests)
+└── 🎨 sketch/agent-harness/             # Sketch CLI (19 tests, Node.js)
 ```
 
 Each `agent-harness/` contains an installable Python package under `cli_anything.<software>/` with Click CLI, core modules, utils (including `repl_skin.py` and backend wrapper), and comprehensive tests.

@@ -1,2 +1,0 @@
-[console_scripts]
-cli-anything-acestudio = cli_anything.acestudio.acestudio_cli:main

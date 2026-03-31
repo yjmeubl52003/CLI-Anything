@@ -1,0 +1,162 @@
+Metadata-Version: 2.1
+Name: cli-anything-acestudio
+Version: 1.0.0
+Summary: CLI harness for ACE Studio via the official local MCP server
+Home-page: https://github.com/HKUDS/CLI-Anything
+Author: cli-anything contributors
+Author-email: 
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: Topic :: Multimedia :: Sound/Audio
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Provides-Extra: repl
+Requires-Dist: prompt-toolkit>=3.0.0; extra == "repl"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0.0; extra == "dev"
+
+# ACE Studio CLI
+
+A stateful command-line interface for inspecting and lightly controlling ACE Studio through its official local MCP server.
+
+## Prerequisites
+
+- Python 3.10+
+- ACE Studio 2.x installed and running
+- ACE Studio MCP Server enabled in `Preferences -> General -> MCP Server`
+
+Default MCP endpoint:
+
+```text
+http://localhost:21572/mcp
+```
+
+## Install
+
+From the `agent-harness/` directory:
+
+```bash
+pip install -e .
+```
+
+Optional richer REPL experience:
+
+```bash
+pip install "cli-anything-acestudio[repl]"
+```
+
+## Quick Check
+
+```bash
+cli-anything-acestudio server ping
+cli-anything-acestudio server capabilities --json
+```
+
+## Core Commands
+
+### Project
+
+```bash
+cli-anything-acestudio project info
+cli-anything-acestudio project playback-status
+cli-anything-acestudio project synthesis-status
+cli-anything-acestudio project tempo-list --json
+cli-anything-acestudio project timesig-list --json
+```
+
+### Track
+
+```bash
+cli-anything-acestudio track list
+cli-anything-acestudio track meta 0 --json
+cli-anything-acestudio track selected
+```
+
+### Clip
+
+```bash
+cli-anything-acestudio clip list 0
+cli-anything-acestudio clip meta 0 0 --time-unit tick --json
+cli-anything-acestudio clip notes 0 0 --range-scope project --json
+cli-anything-acestudio clip lyrics 0 0 --json
+cli-anything-acestudio clip audio-info 1 0 --json
+```
+
+### Sound Source
+
+```bash
+cli-anything-acestudio sound-source list --type voice --language en --json
+cli-anything-acestudio sound-source tags --type voice
+cli-anything-acestudio sound-source community-list --page 0 --json
+```
+
+### Conversion
+
+```bash
+cli-anything-acestudio convert tick-to-time 4800
+cli-anything-acestudio convert time-to-tick 3.5
+cli-anything-acestudio convert tick-to-measure 9600 --consider-beat-mode
+cli-anything-acestudio convert measure-to-tick 4 120 --consider-beat-mode --beat-pos 2
+```
+
+### Transport and Navigation
+
+```bash
+cli-anything-acestudio transport play
+cli-anything-acestudio transport stop
+cli-anything-acestudio metronome get
+cli-anything-acestudio metronome set on
+cli-anything-acestudio loop get
+cli-anything-acestudio loop set-range --start 0 --end 1920
+cli-anything-acestudio marker get --scope global
+cli-anything-acestudio marker seek --seconds 12.5
+```
+
+## JSON Output
+
+Add `--json` to any command for machine-readable output:
+
+```bash
+cli-anything-acestudio --json track list
+```
+
+## Interactive REPL
+
+Run without a subcommand:
+
+```bash
+cli-anything-acestudio
+```
+
+Inside the REPL, type `help` for a summary or `quit` to exit.
+
+## Scope of v1
+
+This first version focuses on:
+
+- Project, track, and clip inspection
+- Sound source browsing
+- Tempo and position conversion
+- Playback, metronome, loop, and marker control
+
+It does not yet implement:
+
+- Destructive editing
+- Project open/save automation
+- Export/render control
+- `.acep` parsing
+
+## Running Tests
+
+```bash
+cd agent-harness
+python3 -m unittest cli_anything.acestudio.tests.test_core -v
+python3 -m unittest cli_anything.acestudio.tests.test_full_e2e -v
+```

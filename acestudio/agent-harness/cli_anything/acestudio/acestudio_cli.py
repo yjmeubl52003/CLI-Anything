@@ -14,6 +14,7 @@ from cli_anything.acestudio.core import arrangement as arrangement_core
 from cli_anything.acestudio.core import clip as clip_core
 from cli_anything.acestudio.core import convert as convert_core
 from cli_anything.acestudio.core import editor as editor_core
+from cli_anything.acestudio.core import music_prompt_builder as music_prompt_core
 from cli_anything.acestudio.core import project as project_core
 from cli_anything.acestudio.core import sound_source as sound_source_core
 from cli_anything.acestudio.core import track as track_core
@@ -539,6 +540,39 @@ def cmd_arrangement_move_selection(args):
     )
 
 
+def cmd_skill_music_gen(args):
+    """Build an ACE Studio prompt from a description. NO API calls.
+
+    This skill is purely text-based — it converts a natural language
+    description into a structured tags line and lyric template.
+    """
+    import json
+
+    description = args.description
+    if not description and not args.spec_json:
+        raise ValidationError(
+            "--description is required when --spec-json is not provided."
+        )
+
+    if args.spec_json:
+        try:
+            spec = json.loads(args.spec_json)
+        except json.JSONDecodeError as exc:
+            raise ValidationError(f"--spec-json is not valid JSON: {exc}") from exc
+        description = spec.get("description", description)
+
+    prompt = music_prompt_core.build_prompt(description)
+
+    return {
+        "tags": prompt["tags"],
+        "lyrics": prompt["lyrics"],
+        "structure": prompt["structure"],
+        "metadata": prompt["metadata"],
+        "preview": music_prompt_core.build_prompt_preview(prompt),
+        "dry_run": True,
+    }
+
+
 def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--url", default="http://localhost:21572/mcp", help="ACE Studio MCP URL")
     parser.add_argument("--timeout", default=10.0, type=float, help="Request timeout in seconds")
@@ -897,6 +931,15 @@ def build_parser() -> argparse.ArgumentParser:
     attach_command(arrangement_sub, "make-selection", "Create a new arrangement selection range", cmd_arrangement_make_selection, cfg_arrangement_make_selection)
     attach_command(arrangement_sub, "delete-selection", "Delete clips in arrangement selection", cmd_arrangement_delete_selection, cfg_arrangement_delete_selection)
     attach_command(arrangement_sub, "move-selection", "Move arrangement selection to new position", cmd_arrangement_move_selection, cfg_arrangement_move_selection)
+
+    skill = groups.add_parser("skill", help="AI music generation skills")
+    skill_sub = skill.add_subparsers(dest="command")
+
+    def cfg_skill_music_gen(p):
+        p.add_argument("--description", default=None, help="Natural language description of the song (e.g. 'melancholy night jazz')")
+        p.add_argument("--spec-json", default=None, help="Structured spec JSON with optional description override")
+
+    attach_command(skill_sub, "music-gen", "Build ACE Studio prompt from a description (text only, no API calls)", cmd_skill_music_gen, cfg_skill_music_gen)
 
     return parser
 

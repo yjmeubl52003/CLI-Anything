@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 
 from cli_anything.acestudio.acestudio_cli import build_parser, normalize_global_args
-from cli_anything.acestudio.core import arrangement, clip, convert, editor, project, sound_source, track, transport, ui, workflow
+from cli_anything.acestudio.core import arrangement, clip, convert, editor, music_prompt_builder, project, sound_source, track, transport, ui, workflow
 from cli_anything.acestudio.mcp_client import InvalidContextError, ValidationError
 from cli_anything.acestudio.mcp_client import ACEStudioMCPClient
 
@@ -791,6 +791,125 @@ class ArrangementModuleTests(unittest.TestCase):
         args = parser.parse_args(["arrangement", "move-selection", "--target-tick", "3840", "--target-track-index", "1"])
         self.assertEqual(args.target_tick, 3840)
         self.assertEqual(args.target_track_index, 1)
+
+
+class MusicPromptBuilderTests(unittest.TestCase):
+    def test_parse_description_extracts_tempo(self):
+        result = music_prompt_builder.parse_description("happy pop song, 120 BPM")
+        self.assertEqual(result["tempo"], 120)
+        self.assertIsNotNone(result["bpm_hint"])
+
+    def test_parse_description_tempo_none_when_not_specified(self):
+        result = music_prompt_builder.parse_description("happy pop song")
+        self.assertIsNone(result["tempo"])
+        self.assertIn("BPM", result["bpm_hint"])
+
+    def test_parse_description_extracts_genre(self):
+        result = music_prompt_builder.parse_description("sad ballad")
+        self.assertEqual(result["genre"], "ballad")
+        self.assertIn("sad", result["mood"])
+
+    def test_parse_description_extracts_mood(self):
+        result = music_prompt_builder.parse_description("upbeat rock song")
+        self.assertIn("upbeat", result["mood"])
+        self.assertEqual(result["genre"], "rock")
+
+    def test_parse_description_detects_chinese(self):
+        result = music_prompt_builder.parse_description("一首中文歌曲")
+        self.assertEqual(result["language"], "zh")
+
+    def test_parse_description_detects_english(self):
+        result = music_prompt_builder.parse_description("a happy pop song")
+        self.assertEqual(result["language"], "en")
+
+    def test_parse_description_extracts_instruments(self):
+        result = music_prompt_builder.parse_description("rock song with electric guitar and bass")
+        self.assertIn("electric guitar", result["instruments"])
+        self.assertIn("bass", result["instruments"])
+
+    def test_parse_description_detects_instrumental(self):
+        result = music_prompt_builder.parse_description("instrumental piano piece")
+        self.assertTrue(result["is_instrumental"])
+        self.assertEqual(result["vocal_type"], "no vocals")
+
+    def test_parse_description_has_required_keys(self):
+        result = music_prompt_builder.parse_description("pop song")
+        for key in ("genre", "instruments", "mood", "tempo", "bpm_hint",
+                    "vocal_type", "language", "structure", "is_instrumental", "raw"):
+            self.assertIn(key, result, f"Missing key: {key}")
+
+    def test_build_tags_returns_string(self):
+        params = music_prompt_builder.parse_description("happy pop song")
+        tags = music_prompt_builder.build_tags(params)
+        self.assertIsInstance(tags, str)
+        self.assertIn("pop", tags.lower())
+        self.assertIn("happy", tags.lower())
+
+    def test_build_tags_includes_instruments(self):
+        params = music_prompt_builder.parse_description("rock song with electric guitar")
+        tags = music_prompt_builder.build_tags(params)
+        self.assertIsInstance(tags, str)
+        self.assertGreater(len(tags), 0)
+
+    def test_build_lyrics_returns_string(self):
+        params = music_prompt_builder.parse_description("pop song")
+        lyrics = music_prompt_builder.build_lyrics(params)
+        self.assertIsInstance(lyrics, str)
+        self.assertIn("[verse]", lyrics)
+        self.assertIn("[chorus]", lyrics)
+
+    def test_build_lyrics_contains_section_markers(self):
+        params = music_prompt_builder.parse_description("pop song")
+        lyrics = music_prompt_builder.build_lyrics(params)
+        for section in ("[verse", "[chorus", "[intro", "[outro"):
+            self.assertIn(section, lyrics, f"Missing {section}")
+
+    def test_build_lyrics_chinese_sections(self):
+        params = music_prompt_builder.parse_description("一首中文歌曲")
+        lyrics = music_prompt_builder.build_lyrics(params)
+        self.assertIsInstance(lyrics, str)
+
+    def test_build_prompt_returns_dict(self):
+        prompt = music_prompt_builder.build_prompt("happy pop song, 120 BPM")
+        self.assertIsInstance(prompt, dict)
+        self.assertIn("tags", prompt)
+        self.assertIn("lyrics", prompt)
+        self.assertIn("structure", prompt)
+        self.assertIn("metadata", prompt)
+
+    def test_build_prompt_metadata(self):
+        prompt = music_prompt_builder.build_prompt("sad ballad")
+        md = prompt["metadata"]
+        self.assertEqual(md["genre"], "ballad")
+        self.assertIn("sad", md["mood"])
+
+    def test_build_prompt_preview_returns_string(self):
+        prompt = music_prompt_builder.build_prompt("happy pop song")
+        preview = music_prompt_builder.build_prompt_preview(prompt)
+        self.assertIsInstance(preview, str)
+        self.assertIn("[TAGS]", preview)
+        self.assertIn("[LYRIC STRUCTURE]", preview)
+        self.assertIn("ACE STUDIO", preview)
+
+    def test_conflict_detection(self):
+        params = music_prompt_builder.parse_description(
+            "sad ballad"
+        )
+        self.assertIsInstance(params["mood"], list)
+
+    def test_genre_longest_match(self):
+        result = music_prompt_builder.parse_description("upbeat synthwave pop")
+        self.assertEqual(result["genre"], "synthwave")
+
+    def test_parser_accepts_skill_music_gen(self):
+        parser = build_parser()
+        args = parser.parse_args(["skill", "music-gen", "--description", "happy pop song"])
+        self.assertEqual(args.description, "happy pop song")
+
+    def test_parser_accepts_skill_music_gen_spec_json(self):
+        parser = build_parser()
+        args = parser.parse_args(["skill", "music-gen", "--spec-json", '{"bpm":100}'])
+        self.assertIsNotNone(args.spec_json)
 
 
 if __name__ == "__main__":

@@ -44,16 +44,10 @@ def _mcp_available() -> bool:
 class LiveIntegrationTests(unittest.TestCase):
     """Live integration tests for ACE Studio MCP — Phase 4."""
 
-    @classmethod
-    def setUpClass(cls):
-        """Create a shared client for all tests in this class."""
-        cls.client = ACEStudioMCPClient(timeout=10)
-        cls.client.initialize()
-
-    @classmethod
-    def tearDownClass(cls):
-        """Cleanup after all tests. ACEStudioMCPClient has no persistent connection to close."""
-        pass
+    def setUp(self):
+        """Create a fresh client for each test to avoid state pollution."""
+        self.client = ACEStudioMCPClient(timeout=10)
+        self.client.initialize()
 
     def _require_project(self):
         """Ensure a project is open. Skips test if no project is open."""

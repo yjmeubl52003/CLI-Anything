@@ -154,3 +154,63 @@ def add_clip(client, track_index: int, pos: int, dur: int, clip_type: str, name:
         },
         "created_clip": created,
     }
+
+
+def move_clip_edges(
+    client,
+    clip_uuid: str,
+    side: str,
+    mode: str,
+    value: int,
+    dry_run: bool = False,
+) -> dict:
+    """Move a clip edge (trim or expand) by UUID.
+
+    Args:
+        client: ACEStudioMCPClient instance.
+        clip_uuid: The UUID of the target clip.
+        side: Which edge to move ('left' or 'right').
+        mode: Positioning mode ('diff' for relative offset, 'abs' for absolute position).
+        value: Tick offset (diff mode) or absolute tick position (abs mode).
+        dry_run: If True, return what would change without actually modifying.
+
+    Returns:
+        Dict with edge modification details.
+    """
+    if side not in {"left", "right"}:
+        raise ValidationError("--side must be 'left' or 'right'.")
+    if mode not in {"diff", "abs"}:
+        raise ValidationError("--mode must be 'diff' or 'abs'.")
+    if not isinstance(value, int):
+        raise ValidationError("--value must be an integer (ticks).")
+    if not clip_uuid or not clip_uuid.strip():
+        raise ValidationError("--uuid must be a non-empty string.")
+
+    args = {
+        "clipUuid": clip_uuid.strip(),
+        "side": side,
+        "mode": mode,
+        "value": value,
+    }
+
+    if dry_run:
+        return {
+            "dry_run": True,
+            "would_modify": {
+                "clip_uuid": clip_uuid,
+                "side": side,
+                "mode": mode,
+                "value": value,
+            },
+            "note": "Use --dry-run to preview, or execute without --dry-run to apply.",
+        }
+
+    result = client.call_tool("move_clip_edges", args)
+    return {
+        "dry_run": False,
+        "clip_uuid": clip_uuid,
+        "side": side,
+        "mode": mode,
+        "value": value,
+        "result": result,
+    }

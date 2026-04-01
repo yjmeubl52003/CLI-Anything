@@ -5,8 +5,8 @@ from __future__ import annotations
 import unittest
 
 from cli_anything.acestudio.acestudio_cli import build_parser, normalize_global_args
-from cli_anything.acestudio.core import clip, convert, project, sound_source, track, transport, ui, workflow
-from cli_anything.acestudio.mcp_client import ValidationError
+from cli_anything.acestudio.core import arrangement, clip, convert, editor, project, sound_source, track, transport, ui, workflow
+from cli_anything.acestudio.mcp_client import InvalidContextError, ValidationError
 from cli_anything.acestudio.mcp_client import ACEStudioMCPClient
 
 
@@ -258,6 +258,47 @@ class CoreModuleTests(unittest.TestCase):
         self.assertTrue(result["precheck"]["overlaps_existing_clips"])
         self.assertEqual(client.calls[-1][0], "add_new_clip")
 
+    def test_move_clip_edges_requires_valid_side(self):
+        client = DummyClient({})
+        with self.assertRaises(ValidationError):
+            clip.move_clip_edges(client, "abc", "middle", "diff", 100)
+
+    def test_move_clip_edges_requires_valid_mode(self):
+        client = DummyClient({})
+        with self.assertRaises(ValidationError):
+            clip.move_clip_edges(client, "abc", "left", "relative", 100)
+
+    def test_move_clip_edges_rejects_empty_uuid(self):
+        client = DummyClient({})
+        with self.assertRaises(ValidationError):
+            clip.move_clip_edges(client, "  ", "left", "diff", 100)
+
+    def test_move_clip_edges_dry_run(self):
+        mapping = {
+            "get_content_track_basic_info_list": {
+                "tracks": [{"trackIndex": 0, "trackType": "Sing", "trackName": "Lead", "clipCount": 1}],
+            }
+        }
+        client = DummyClient(mapping)
+        result = clip.move_clip_edges(client, "clip-uuid-123", "left", "diff", -480, dry_run=True)
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["would_modify"]["side"], "left")
+        self.assertEqual(result["would_modify"]["mode"], "diff")
+
+    def test_move_clip_edges_executes(self):
+        mapping = {
+            "get_content_track_basic_info_list": {
+                "tracks": [{"trackIndex": 0, "trackType": "Sing", "trackName": "Lead", "clipCount": 1}],
+            },
+            "move_clip_edges": {"ok": True},
+        }
+        client = DummyClient(mapping)
+        result = clip.move_clip_edges(client, "clip-uuid-123", "right", "abs", 1920, dry_run=False)
+        self.assertFalse(result["dry_run"])
+        self.assertEqual(client.calls[-1][0], "move_clip_edges")
+        self.assertEqual(client.calls[-1][1]["side"], "right")
+        self.assertEqual(client.calls[-1][1]["mode"], "abs")
+
     def test_load_sound_source_requires_group_for_singer(self):
         mapping = self._track_mapping()
         mapping["get_content_track_meta_settings"] = {"trackType": "Sing"}
@@ -269,6 +310,49 @@ class CoreModuleTests(unittest.TestCase):
         client = DummyClient({})
         with self.assertRaises(ValidationError):
             sound_source.collect_community_voice(client, 0)
+
+    def test_unload_sound_source_rejects_non_sing_track(self):
+        mapping = {
+            "get_content_track_basic_info_list": {
+                "tracks": [{"trackIndex": 0, "trackType": "GenericMidi", "trackName": "MIDI"}],
+            },
+            "get_content_track_meta_settings": {"trackType": "GenericMidi"},
+        }
+        client = DummyClient(mapping)
+        with self.assertRaises(ValidationError):
+            sound_source.unload_sound_source(client, 0)
+
+    def test_unload_sound_source_dry_run(self):
+        mapping = {
+            "get_content_track_basic_info_list": {
+                "tracks": [{"trackIndex": 0, "trackType": "Sing", "trackName": "Lead", "soundSourceName": "Tenor-1", "clipCount": 1}],
+            },
+            "get_content_track_meta_settings": {"trackType": "Sing", "soundSourceInfo": {"soundSourceName": "Tenor-1"}},
+        }
+        client = DummyClient(mapping)
+        result = sound_source.unload_sound_source(client, 0, dry_run=True)
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["would_unload"]["track_index"], 0)
+        self.assertIn("DATA LOSS", result["warning"])
+
+    def test_unload_sound_source_executes(self):
+        mapping = {
+            "get_content_track_basic_info_list": {
+                "tracks": [{"trackIndex": 0, "trackType": "Sing", "trackName": "Lead", "soundSourceName": "Tenor-1", "clipCount": 1}],
+            },
+            "get_content_track_meta_settings": {"trackType": "Sing", "soundSourceInfo": {"soundSourceName": "Tenor-1"}},
+            "unload_sound_source_on_track": {"ok": True},
+        }
+        client = DummyClient(mapping)
+        result = sound_source.unload_sound_source(client, 0, dry_run=False)
+        self.assertFalse(result["dry_run"])
+        self.assertEqual(client.calls[-1][0], "unload_sound_source_on_track")
+
+    def test_parser_accepts_sound_source_unload(self):
+        parser = build_parser()
+        args = parser.parse_args(["sound-source", "unload", "0", "--dry-run"])
+        self.assertEqual(args.track_index, 0)
+        self.assertTrue(args.dry_run)
 
     def test_ui_special_track_mapping(self):
         client = DummyClient({"set_special_track_visibility": {"ok": True}})
@@ -289,6 +373,43 @@ class CoreModuleTests(unittest.TestCase):
         self.assertEqual(args.track_index, 0)
         self.assertEqual(args.name, "Lead Vox")
 
+    def test_delete_selected_track_requires_selection(self):
+        client = DummyClient({"get_selected_track_list": {"selectedTracks": [], "selectedTrackCount": 0}})
+        with self.assertRaises(InvalidContextError):
+            track.delete_selected_track(client)
+
+    def test_delete_selected_track_dry_run(self):
+        mapping = {
+            "get_selected_track_list": {
+                "selectedTracks": [{"trackIndex": 0, "trackUuid": "{abc}"}],
+                "selectedTrackCount": 1,
+            },
+            "get_content_track_meta_settings": {"trackType": "Sing", "trackName": "Lead"},
+        }
+        client = DummyClient(mapping)
+        result = track.delete_selected_track(client, dry_run=True)
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["would_delete"]["track_count"], 1)
+
+    def test_delete_selected_track_executes(self):
+        mapping = {
+            "get_selected_track_list": {
+                "selectedTracks": [{"trackIndex": 0, "trackUuid": "{abc}"}],
+                "selectedTrackCount": 1,
+            },
+            "get_content_track_meta_settings": {"trackType": "Sing", "trackName": "Lead"},
+            "delete_selected_track": {"ok": True},
+        }
+        client = DummyClient(mapping)
+        result = track.delete_selected_track(client, dry_run=False)
+        self.assertFalse(result["dry_run"])
+        self.assertEqual(client.calls[-1][0], "delete_selected_track")
+
+    def test_parser_accepts_track_delete_dry_run(self):
+        parser = build_parser()
+        args = parser.parse_args(["track", "delete", "--dry-run"])
+        self.assertTrue(args.dry_run)
+
     def test_parser_accepts_project_set_tempo_command(self):
         parser = build_parser()
         args = parser.parse_args(["project", "set-tempo", "--points-json", '[{"pos":0,"value":120}]', "--replace-all"])
@@ -298,6 +419,19 @@ class CoreModuleTests(unittest.TestCase):
         parser = build_parser()
         args = parser.parse_args(["project", "set-timesig", "--signatures-json", '[{"barPos":0,"numerator":4,"denominator":4}]', "--replace-all"])
         self.assertTrue(args.replace_all)
+
+    def test_parser_accepts_clip_move_edges(self):
+        parser = build_parser()
+        args = parser.parse_args(["clip", "move-edges", "--uuid", "abc123", "--side", "left", "--mode", "diff", "--value", "480"])
+        self.assertEqual(args.uuid, "abc123")
+        self.assertEqual(args.side, "left")
+        self.assertEqual(args.mode, "diff")
+        self.assertEqual(args.value, 480)
+
+    def test_parser_accepts_clip_move_edges_dry_run(self):
+        parser = build_parser()
+        args = parser.parse_args(["clip", "move-edges", "--uuid", "abc123", "--side", "right", "--mode", "abs", "--value", "1920", "--dry-run"])
+        self.assertTrue(args.dry_run)
 
     def test_validate_song_skeleton_requires_core_keys(self):
         client = DummyClient(self._track_mapping())
@@ -386,6 +520,277 @@ class CoreModuleTests(unittest.TestCase):
         parser = build_parser()
         args = parser.parse_args(["workflow", "song-skeleton", "--spec-json", '{"tempo":[],"timesig":[],"sections":[],"tracks":[]}', "--dry-run"])
         self.assertTrue(args.dry_run)
+
+
+class EditorModuleTests(unittest.TestCase):
+    def _editor_mapping(self):
+        return {
+            "get_is_editor_available": {
+                "isAvailable": True,
+                "isVisible": True,
+                "editorType": "Sing",
+                "trackIndex": 0,
+                "clipIndex": 0,
+                "clipName": "Verse 1",
+                "defaultLanguage": "English",
+            },
+            "get_editor_current_clip_index": {
+                "trackIndex": 0,
+                "clipIndex": 0,
+                "clipName": "Verse 1",
+                "clipType": "Sing",
+                "defaultLanguage": "English",
+            },
+            "get_content_in_editor": {"notes": []},
+            "get_selection_in_editor": {"hasSelection": False},
+        }
+
+    def test_editor_availability_normalization(self):
+        client = DummyClient(self._editor_mapping())
+        result = editor.get_editor_availability(client)
+        self.assertTrue(result["is_available"])
+        self.assertTrue(result["is_visible"])
+        self.assertEqual(result["editor_type"], "Sing")
+
+    def test_editor_availability_returns_unavailable(self):
+        client = DummyClient({"get_is_editor_available": {"isAvailable": False, "isVisible": False}})
+        result = editor.get_editor_availability(client)
+        self.assertFalse(result["is_available"])
+        self.assertFalse(result["is_visible"])
+
+    def test_editor_clip_normalization(self):
+        client = DummyClient(self._editor_mapping())
+        result = editor.get_editor_clip(client)
+        self.assertEqual(result["track_index"], 0)
+        self.assertEqual(result["clip_index"], 0)
+
+    def test_editor_clip_requires_available(self):
+        client = DummyClient({"get_is_editor_available": {"isAvailable": False, "isVisible": False}})
+        with self.assertRaises(InvalidContextError):
+            editor.get_editor_clip(client)
+
+    def test_add_notes_requires_lyric_or_notes(self):
+        client = DummyClient(self._editor_mapping())
+        with self.assertRaises(ValidationError):
+            editor.add_notes(client)
+
+    def test_add_notes_with_sentence_mode(self):
+        mapping = self._editor_mapping()
+        mapping["add_notes_in_editor"] = {"ok": True}
+        client = DummyClient(mapping)
+        result = editor.add_notes(client, lyric_sentence="hello world", notes=[{"pos": 0, "dur": 480, "pitch": 60}])
+        self.assertEqual(result["added_notes_count"], 1)
+        self.assertEqual(result["lyric_sentence"], "hello world")
+        self.assertEqual(client.calls[-1][0], "add_notes_in_editor")
+
+    def test_add_notes_rejects_negative_offset(self):
+        client = DummyClient(self._editor_mapping())
+        with self.assertRaises(ValidationError):
+            editor.add_notes(client, lyric="la", offset=-1)
+
+    def test_add_notes_rejects_invalid_pitch(self):
+        client = DummyClient(self._editor_mapping())
+        with self.assertRaises(ValidationError):
+            editor.add_notes(client, notes=[{"pos": 0, "dur": 480, "pitch": 200}])
+
+    def test_add_notes_with_language(self):
+        mapping = self._editor_mapping()
+        mapping["add_notes_in_editor"] = {"ok": True}
+        client = DummyClient(mapping)
+        result = editor.add_notes(client, lyric_sentence="ni hao", notes=[{"pos": 0, "dur": 480, "pitch": 60}], language="Mandarin Chinese")
+        self.assertEqual(result["language"], "Mandarin Chinese")
+
+    def test_set_editor_selection_range_requires_valid_range(self):
+        client = DummyClient(self._editor_mapping())
+        with self.assertRaises(ValidationError):
+            editor.set_editor_selection_range(client, 100, 50)
+
+    def test_set_editor_selection_range_payload(self):
+        mapping = self._editor_mapping()
+        mapping["set_editor_selection_range"] = {"ok": True}
+        client = DummyClient(mapping)
+        result = editor.set_editor_selection_range(client, 0, 480, select_notes=True)
+        self.assertEqual(result["range_begin"], 0)
+        self.assertEqual(result["range_end"], 480)
+        self.assertTrue(result["select_notes"])
+        self.assertEqual(client.calls[-1][0], "set_editor_selection_range")
+
+    def test_delete_editor_selection_requires_selection(self):
+        client = DummyClient(self._editor_mapping())
+        with self.assertRaises(InvalidContextError):
+            editor.delete_editor_selection(client)
+
+    def test_delete_editor_selection_dry_run(self):
+        mapping = self._editor_mapping()
+        mapping["get_selection_in_editor"] = {"hasSelection": True, "selectedNotes": [{"uuid": "a", "pos": 0}]}
+        client = DummyClient(mapping)
+        result = editor.delete_editor_selection(client, dry_run=True)
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["would_delete"]["note_count"], 1)
+
+    def test_delete_editor_selection_executes(self):
+        mapping = self._editor_mapping()
+        mapping["get_selection_in_editor"] = {"hasSelection": True, "selectedNotes": [{"uuid": "a", "pos": 0}]}
+        mapping["delete_editor_selection"] = {"ok": True}
+        client = DummyClient(mapping)
+        result = editor.delete_editor_selection(client, dry_run=False)
+        self.assertFalse(result["dry_run"])
+        self.assertEqual(client.calls[-1][0], "delete_editor_selection")
+
+    def test_modify_note_selection_requires_mode(self):
+        client = DummyClient(self._editor_mapping())
+        with self.assertRaises(ValidationError):
+            editor.modify_note_selection(client, "invalid_mode")
+
+    def test_modify_note_selection_replace_requires_notes(self):
+        client = DummyClient(self._editor_mapping())
+        with self.assertRaises(ValidationError):
+            editor.modify_note_selection(client, "replace")
+
+    def test_modify_note_selection_payload(self):
+        mapping = self._editor_mapping()
+        mapping["modify_note_selection_in_editor"] = {"ok": True}
+        client = DummyClient(mapping)
+        result = editor.modify_note_selection(
+            client,
+            "replace",
+            notes_to_select=[{"uuid": "abc123"}],
+        )
+        self.assertEqual(result["mode"], "replace")
+        self.assertEqual(client.calls[-1][1]["mode"], "replace")
+
+    def test_parse_notes_rejects_invalid_json(self):
+        with self.assertRaises(ValidationError):
+            editor._parse_notes("not json")
+
+    def test_parse_notes_rejects_non_array(self):
+        with self.assertRaises(ValidationError):
+            editor._parse_notes('{"pos": 0}')
+
+    def test_parse_notes_rejects_missing_fields(self):
+        with self.assertRaises(ValidationError):
+            editor._parse_notes('[{"pos": 0}]')
+
+    def test_parser_accepts_editor_add_notes(self):
+        parser = build_parser()
+        args = parser.parse_args(["editor", "add-notes", "--lyric-sentence", "hello", "--notes-json", '[{"pos":0,"dur":480,"pitch":60}]'])
+        self.assertEqual(args.lyric_sentence, "hello")
+
+    def test_parser_accepts_editor_delete_selection_dry_run(self):
+        parser = build_parser()
+        args = parser.parse_args(["editor", "delete-selection", "--dry-run"])
+        self.assertTrue(args.dry_run)
+
+    def test_parser_accepts_editor_selection_range(self):
+        parser = build_parser()
+        args = parser.parse_args(["editor", "selection-range", "--range-begin", "0", "--range-end", "480", "--select-notes"])
+        self.assertEqual(args.range_begin, 0)
+        self.assertEqual(args.range_end, 480)
+        self.assertTrue(args.select_notes)
+
+
+class ArrangementModuleTests(unittest.TestCase):
+    def _selection_mapping(self):
+        return {
+            "get_current_arrangement_view_selection_range": {
+                "horizontalSelection": {"begin": 0, "end": 1920},
+                "verticalSelection": {"begin": 0, "end": 1},
+            }
+        }
+
+    def test_get_arrangement_selection_normalization(self):
+        client = DummyClient(self._selection_mapping())
+        result = arrangement.get_arrangement_selection(client)
+        self.assertTrue(result["has_selection"])
+        self.assertEqual(result["horizontal"]["begin"], 0)
+        self.assertEqual(result["horizontal"]["end"], 1920)
+        self.assertEqual(result["vertical"]["begin"], 0)
+        self.assertEqual(result["vertical"]["end"], 1)
+
+    def test_get_arrangement_selection_no_selection(self):
+        client = DummyClient({"get_current_arrangement_view_selection_range": {}})
+        result = arrangement.get_arrangement_selection(client)
+        self.assertFalse(result["has_selection"])
+
+    def test_make_arrangement_selection_payload(self):
+        mapping = self._selection_mapping()
+        mapping["make_new_arrangement_view_selection_range"] = {"ok": True}
+        client = DummyClient(mapping)
+        result = arrangement.make_arrangement_selection(client, 0, 2, 0, 1920)
+        self.assertEqual(result["horizontal"]["begin"], 0)
+        self.assertEqual(result["vertical"]["end"], 2)
+        self.assertEqual(client.calls[-1][0], "make_new_arrangement_view_selection_range")
+
+    def test_make_arrangement_selection_rejects_invalid_track_range(self):
+        client = DummyClient(self._selection_mapping())
+        with self.assertRaises(ValidationError):
+            arrangement.make_arrangement_selection(client, 5, 2, 0, 1920)
+
+    def test_make_arrangement_selection_rejects_invalid_tick_range(self):
+        client = DummyClient(self._selection_mapping())
+        with self.assertRaises(ValidationError):
+            arrangement.make_arrangement_selection(client, 0, 2, 1920, 0)
+
+    def test_delete_arrangement_selection_requires_selection(self):
+        client = DummyClient({"get_current_arrangement_view_selection_range": {}})
+        with self.assertRaises(InvalidContextError):
+            arrangement.delete_arrangement_selection(client)
+
+    def test_delete_arrangement_selection_dry_run(self):
+        client = DummyClient(self._selection_mapping())
+        result = arrangement.delete_arrangement_selection(client, dry_run=True)
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["would_delete"]["tick_range"]["begin"], 0)
+
+    def test_delete_arrangement_selection_executes(self):
+        mapping = self._selection_mapping()
+        mapping["delete_arrangement_view_selection"] = {"ok": True}
+        client = DummyClient(mapping)
+        result = arrangement.delete_arrangement_selection(client, dry_run=False)
+        self.assertFalse(result["dry_run"])
+        self.assertEqual(client.calls[-1][0], "delete_arrangement_view_selection")
+
+    def test_move_arrangement_selection_requires_selection(self):
+        client = DummyClient({"get_current_arrangement_view_selection_range": {}})
+        with self.assertRaises(InvalidContextError):
+            arrangement.move_arrangement_selection(client, 3840)
+
+    def test_move_arrangement_selection_dry_run(self):
+        client = DummyClient(self._selection_mapping())
+        result = arrangement.move_arrangement_selection(client, 3840, None, dry_run=True)
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["would_move"]["to"]["tick"], 3840)
+
+    def test_move_arrangement_selection_executes(self):
+        mapping = self._selection_mapping()
+        mapping["move_arrangement_selection"] = {"ok": True}
+        client = DummyClient(mapping)
+        result = arrangement.move_arrangement_selection(client, 3840, 1, dry_run=False)
+        self.assertFalse(result["dry_run"])
+        self.assertEqual(client.calls[-1][1]["targetTick"], 3840)
+        self.assertEqual(client.calls[-1][1]["targetTrackIndex"], 1)
+
+    def test_parser_accepts_arrangement_get_selection(self):
+        parser = build_parser()
+        args = parser.parse_args(["arrangement", "get-selection"])
+        self.assertIsNotNone(args)
+
+    def test_parser_accepts_arrangement_make_selection(self):
+        parser = build_parser()
+        args = parser.parse_args(["arrangement", "make-selection", "--track-begin", "0", "--track-end", "2", "--tick-begin", "0", "--tick-end", "1920"])
+        self.assertEqual(args.track_begin, 0)
+        self.assertEqual(args.tick_end, 1920)
+
+    def test_parser_accepts_arrangement_delete_selection_dry_run(self):
+        parser = build_parser()
+        args = parser.parse_args(["arrangement", "delete-selection", "--dry-run"])
+        self.assertTrue(args.dry_run)
+
+    def test_parser_accepts_arrangement_move_selection(self):
+        parser = build_parser()
+        args = parser.parse_args(["arrangement", "move-selection", "--target-tick", "3840", "--target-track-index", "1"])
+        self.assertEqual(args.target_tick, 3840)
+        self.assertEqual(args.target_track_index, 1)
 
 
 if __name__ == "__main__":

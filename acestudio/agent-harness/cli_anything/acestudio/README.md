@@ -71,7 +71,10 @@ cli-anything-acestudio track set-solo 0 off
 cli-anything-acestudio track set-pan 0 --pan -0.25
 cli-anything-acestudio track set-gain 0 --gain 0.9
 cli-anything-acestudio track set-record 0 --listen on --midi-source custom --midi-device "Keyboard" --midi-channel 1
+cli-anything-acestudio track delete --dry-run
 ```
+
+**Delete warning:** `track delete` permanently removes selected tracks and all their content (clips, notes, etc.). Use `track select` to select tracks first, then `--dry-run` to preview.
 
 ### Clip
 
@@ -82,6 +85,7 @@ cli-anything-acestudio clip notes 0 0 --range-scope project --json
 cli-anything-acestudio clip lyrics 0 0 --json
 cli-anything-acestudio clip audio-info 1 0 --json
 cli-anything-acestudio clip add 0 --pos 0 --dur 1920 --type sing --name "Verse Lead"
+cli-anything-acestudio clip move-edges --uuid "clip-uuid" --side left --mode diff --value -480 --dry-run
 ```
 
 ### Sound Source
@@ -92,7 +96,10 @@ cli-anything-acestudio sound-source tags --type voice
 cli-anything-acestudio sound-source community-list --page 0 --json
 cli-anything-acestudio sound-source collect-community --id 12345
 cli-anything-acestudio sound-source load 0 --kind singer --id 12345 --group official
+cli-anything-acestudio sound-source unload 0 --dry-run
 ```
+
+**Unload warning:** `sound-source unload` causes DATA LOSS — it downgrades Sing/Instrument tracks to Generic MIDI, losing lyrics, vocal controls, and articulations. Always use `--dry-run` first.
 
 ### Conversion
 
@@ -144,6 +151,56 @@ This workflow expects existing tracks in the current ACE Studio project. It will
 - create section clips on the specified existing tracks
 - optionally load sound sources when `sound_source` is present in a track spec
 
+### Editor
+
+Pattern editor commands operate on the currently open editor (determined by marker-line position). The editor must be open and visible before using write commands.
+
+```bash
+cli-anything-acestudio editor availability
+cli-anything-acestudio editor clip
+cli-anything-acestudio editor content
+cli-anything-acestudio editor selection
+cli-anything-acestudio editor selection-range --range-begin 0 --range-end 1920 --select-notes
+cli-anything-acestudio editor modify-selection --mode replace --notes-to-select-json '[{"uuid":"abc123"}]'
+cli-anything-acestudio editor add-notes --lyric-sentence "hello world" --notes-json '[{"pos":0,"dur":480,"pitch":60}]' --offset 0 --language English
+cli-anything-acestudio editor delete-selection --dry-run
+```
+
+**Add notes modes:**
+- Sentence mode (recommended): `--lyric-sentence "sing a song"` with `--notes-json` for automatic syllable distribution
+- Per-note mode: `--lyric "la la la"` with `--notes-json`
+
+**Lyric formats for Sing clips:**
+- Syllable: `word#index` for multi-syllable words (e.g., `happy#1`, `happy#2`)
+- Tenuto: `-` to extend a syllable across multiple notes (e.g., `la - - -` extends "la" across 4 notes)
+
+**Delete selection guard:**
+- `--dry-run` previews what would be deleted without actually deleting
+
+### Arrangement
+
+Arrangement view commands operate on the track view (timeline + tracks).
+
+```bash
+cli-anything-acestudio arrangement get-selection
+cli-anything-acestudio arrangement make-selection --track-begin 0 --track-end 2 --tick-begin 0 --tick-end 1920
+cli-anything-acestudio arrangement delete-selection --dry-run
+cli-anything-acestudio arrangement move-selection --target-tick 3840 --target-track-index 1 --dry-run
+```
+
+**Workflow for deleting clips:**
+1. `arrangement make-selection` to create a selection range
+2. `arrangement get-selection` to verify the selection
+3. `arrangement delete-selection --dry-run` to preview
+4. `arrangement delete-selection` to execute
+
+**Workflow for moving clips:**
+1. `arrangement make-selection` to create a selection range
+2. `arrangement move-selection --target-tick 3840 --target-track-index 1 --dry-run` to preview
+3. `arrangement move-selection --target-tick 3840 --target-track-index 1` to execute
+
+**Note:** Track indices can be negative for special tracks (tempo track, time signature track).
+
 ## JSON Output
 
 Add `--json` to any command for machine-readable output:
@@ -174,13 +231,18 @@ Current scope includes:
 - Clip creation
 - Community voice collection and sound source loading
 - ACE Studio UI visibility toggles
+- Editor inspection (availability, clip, content, selection)
+- Editor note insertion (sentence and per-note modes)
+- Editor selection range and modification
+- Editor delete selection (with --dry-run guard)
+- Arrangement selection (make/get) for timeline operations
+- Arrangement delete/move selection (with --dry-run guard)
+- Clip edge trimming/moving (move-edges with --dry-run guard)
+- Sound source unload (with --dry-run guard, data loss warning)
+- Track deletion for selected tracks (with --dry-run guard)
 
-It does not yet implement:
+Not yet implemented:
 
-- Destructive editing
-- Editor note insertion and deletion
-- Clip edge trimming/moving
-- Arrangement move/delete operations
 - Project open/save automation
 - Export/render control
 - `.acep` parsing

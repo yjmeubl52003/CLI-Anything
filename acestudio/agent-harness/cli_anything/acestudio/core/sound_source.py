@@ -103,3 +103,53 @@ def load_sound_source(client, track_index: int, kind: str, source_id: int, group
         },
         "result": result,
     }
+
+
+def unload_sound_source(client, track_index: int, dry_run: bool = False) -> dict:
+    """Unload sound source from a Sing or Instrument track, downgrading to Generic MIDI.
+
+    WARNING: This causes DATA LOSS. Track-specific features (vocal controls,
+    articulations, lyrics, etc.) will be lost, only basic MIDI note data is preserved.
+
+    Args:
+        client: ACEStudioMCPClient instance.
+        track_index: Index of the track to unload.
+        dry_run: If True, return what would be affected without actually unloading.
+
+    Returns:
+        Dict with unload details or dry-run preview.
+    """
+    track = _get_track_or_raise(client, track_index)
+    meta = get_meta(client, track_index)
+    track_type = track.get("trackType")
+
+    if track_type not in {"Sing", "Instrument"}:
+        raise ValidationError(
+            f"Cannot unload sound source from track type '{track_type}'. "
+            "Only Sing and Instrument tracks have unloadable sound sources."
+        )
+
+    sound_source_name = meta.get("meta", {}).get("soundSourceInfo", {}).get("soundSourceName", "unknown")
+
+    if dry_run:
+        return {
+            "dry_run": True,
+            "would_unload": {
+                "track_index": track_index,
+                "track_name": track.get("trackName"),
+                "track_type": track_type,
+                "sound_source_name": sound_source_name,
+            },
+            "warning": "DATA LOSS: Lyrics, vocal controls, articulations, and track-specific features will be permanently lost. Only basic MIDI note data is preserved.",
+            "note": "The operation is undoable but data cannot be recovered automatically.",
+        }
+
+    result = client.call_tool("unload_sound_source_on_track", {"trackIndex": track_index})
+    return {
+        "dry_run": False,
+        "track_index": track_index,
+        "track_name": track.get("trackName"),
+        "track_type_before": track_type,
+        "sound_source_name": sound_source_name,
+        "result": result,
+    }

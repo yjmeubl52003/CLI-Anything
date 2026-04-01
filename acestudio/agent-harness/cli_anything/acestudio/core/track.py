@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-from cli_anything.acestudio.mcp_client import ValidationError
+from cli_anything.acestudio.mcp_client import InvalidContextError, ValidationError
 
 
 def _raw_track_list(client) -> list[dict]:
@@ -226,5 +226,60 @@ def set_track_record_settings(
         "track_index": track_index,
         "track_name": track.get("trackName"),
         "updates": updates,
+        "result": result,
+    }
+
+
+def delete_selected_track(client, dry_run: bool = False) -> dict:
+    """Delete all currently selected tracks.
+
+    WARNING: This permanently removes all selected tracks and all their content
+    (clips, patterns, notes, etc.). The operation is undoable but destructive.
+
+    Args:
+        client: ACEStudioMCPClient instance.
+        dry_run: If True, return what would be deleted without actually deleting.
+
+    Returns:
+        Dict with deletion details or dry-run preview.
+    """
+    selected_info = get_selected(client)
+    selected_tracks = selected_info.get("selected_tracks", [])
+
+    if not selected_tracks:
+        raise InvalidContextError(
+            "No tracks are currently selected. "
+            "Use 'track select' to select tracks before deleting."
+        )
+
+    track_details = []
+    for item in selected_tracks:
+        idx = item.get("index")
+        if idx is not None:
+            try:
+                meta = get_meta(client, idx)
+                track_details.append({
+                    "track_index": idx,
+                    "track_name": meta.get("meta", {}).get("trackName"),
+                    "track_type": meta.get("meta", {}).get("trackType"),
+                })
+            except Exception:
+                track_details.append({"track_index": idx, "track_name": None, "track_type": None})
+
+    if dry_run:
+        return {
+            "dry_run": True,
+            "would_delete": {
+                "track_count": len(track_details),
+                "tracks": track_details,
+            },
+            "warning": "All selected tracks and their content (clips, notes, etc.) will be permanently deleted. The operation is undoable.",
+        }
+
+    result = client.call_tool("delete_selected_track", {})
+    return {
+        "dry_run": False,
+        "deleted_track_count": len(track_details),
+        "deleted_tracks": track_details,
         "result": result,
     }

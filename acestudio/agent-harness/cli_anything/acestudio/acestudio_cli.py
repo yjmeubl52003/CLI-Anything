@@ -10,8 +10,10 @@ import sys
 from typing import Any, Callable
 
 from cli_anything.acestudio import __version__
+from cli_anything.acestudio.core import arrangement as arrangement_core
 from cli_anything.acestudio.core import clip as clip_core
 from cli_anything.acestudio.core import convert as convert_core
+from cli_anything.acestudio.core import editor as editor_core
 from cli_anything.acestudio.core import project as project_core
 from cli_anything.acestudio.core import sound_source as sound_source_core
 from cli_anything.acestudio.core import track as track_core
@@ -20,6 +22,7 @@ from cli_anything.acestudio.core import ui as ui_core
 from cli_anything.acestudio.core import workflow as workflow_core
 from cli_anything.acestudio.mcp_client import (
     ACEStudioMCPClient,
+    InvalidContextError,
     MCPClientError,
     ServerUnavailableError,
     SessionInitializationError,
@@ -75,6 +78,8 @@ def cli_error_to_exit_code(exc: Exception) -> int:
         return 3
     if isinstance(exc, ValidationError):
         return 4
+    if isinstance(exc, InvalidContextError):
+        return 5
     if isinstance(exc, ToolCallError):
         return 6
     return 1
@@ -232,6 +237,10 @@ def cmd_track_set_record(args):
     )
 
 
+def cmd_track_delete(args):
+    return track_core.delete_selected_track(make_client(args), args.dry_run)
+
+
 def cmd_clip_list(args):
     return clip_core.list_clips(make_client(args), args.track_index)
 
@@ -268,6 +277,17 @@ def cmd_clip_audio_info(args):
 
 def cmd_clip_add(args):
     return clip_core.add_clip(make_client(args), args.track_index, args.pos, args.dur, args.clip_type, args.name)
+
+
+def cmd_clip_move_edges(args):
+    return clip_core.move_clip_edges(
+        make_client(args),
+        args.uuid,
+        args.side,
+        args.mode,
+        args.value,
+        args.dry_run,
+    )
 
 
 def cmd_sound_source_list(args):
@@ -308,6 +328,14 @@ def cmd_sound_source_load(args):
         args.id,
         args.group,
         args.router_id,
+    )
+
+
+def cmd_sound_source_unload(args):
+    return sound_source_core.unload_sound_source(
+        make_client(args),
+        args.track_index,
+        args.dry_run,
     )
 
 
@@ -398,6 +426,117 @@ def cmd_ui_special_track(args):
 def cmd_workflow_song_skeleton(args):
     spec = _load_json_object(args.spec_json, "--spec-json")
     return workflow_core.song_skeleton(make_client(args), spec, dry_run=args.dry_run)
+
+
+def cmd_editor_availability(args):
+    return editor_core.get_editor_availability(make_client(args))
+
+
+def cmd_editor_clip(args):
+    return editor_core.get_editor_clip(make_client(args))
+
+
+def cmd_editor_content(args):
+    range_begin = args.range_begin if hasattr(args, "range_begin") and args.range_begin is not None else None
+    range_end = args.range_end if hasattr(args, "range_end") and args.range_end is not None else None
+    range_scope = args.range_scope if hasattr(args, "range_scope") else "all"
+    return editor_core.get_editor_content(make_client(args), range_scope, range_begin, range_end)
+
+
+def cmd_editor_selection(args):
+    return editor_core.get_editor_selection(make_client(args))
+
+
+def _parse_notes_arg(notes_raw: str) -> list[dict[str, Any]]:
+    return editor_core._parse_notes(notes_raw)
+
+
+def cmd_editor_add_notes(args):
+    notes = None
+    if args.notes_json:
+        notes = _parse_notes_arg(args.notes_json)
+    return editor_core.add_notes(
+        make_client(args),
+        lyric_sentence=args.lyric_sentence,
+        lyric=args.lyric,
+        notes=notes,
+        offset=args.offset,
+        language=args.language,
+    )
+
+
+def cmd_editor_selection_range(args):
+    return editor_core.set_editor_selection_range(
+        make_client(args),
+        args.range_begin,
+        args.range_end,
+        args.select_notes,
+    )
+
+
+def _parse_note_uuids(raw: str, label: str) -> list[dict[str, Any]]:
+    import json
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValidationError(f"{label} must be valid JSON.") from exc
+    if not isinstance(parsed, list):
+        raise ValidationError(f"{label} must be a JSON array of note UUID objects.")
+    result = []
+    for i, item in enumerate(parsed):
+        if not isinstance(item, dict):
+            raise ValidationError(f"{label}[{i}] must be an object with a 'uuid' field.")
+        if "uuid" not in item:
+            raise ValidationError(f"{label}[{i}] is missing required field 'uuid'.")
+        result.append({"uuid": str(item["uuid"])})
+    return result
+
+
+def cmd_editor_modify_selection(args):
+    notes_to_select = None
+    notes_to_deselect = None
+    if args.notes_to_select_json:
+        notes_to_select = _parse_note_uuids(args.notes_to_select_json, "--notes-to-select-json")
+    if args.notes_to_deselect_json:
+        notes_to_deselect = _parse_note_uuids(args.notes_to_deselect_json, "--notes-to-deselect-json")
+    return editor_core.modify_note_selection(
+        make_client(args),
+        args.mode,
+        notes_to_select,
+        notes_to_deselect,
+    )
+
+
+def cmd_editor_delete_selection(args):
+    return editor_core.delete_editor_selection(make_client(args), dry_run=args.dry_run)
+
+
+def cmd_arrangement_get_selection(args):
+    return arrangement_core.get_arrangement_selection(make_client(args))
+
+
+def cmd_arrangement_make_selection(args):
+    return arrangement_core.make_arrangement_selection(
+        make_client(args),
+        args.track_begin,
+        args.track_end,
+        args.tick_begin,
+        args.tick_end,
+    )
+
+
+def cmd_arrangement_delete_selection(args):
+    return arrangement_core.delete_arrangement_selection(make_client(args), dry_run=args.dry_run)
+
+
+def cmd_arrangement_move_selection(args):
+    return arrangement_core.move_arrangement_selection(
+        make_client(args),
+        args.target_tick,
+        args.target_track_index,
+        args.dry_run,
+    )
 
 
 def add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -502,6 +641,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     attach_command(track_sub, "set-record", "Set track record settings", cmd_track_set_record, cfg_track_record)
 
+    def cfg_track_delete(p):
+        p.add_argument("--dry-run", action="store_true", default=False)
+
+    attach_command(track_sub, "delete", "Delete selected tracks (DESTRUCTIVE)", cmd_track_delete, cfg_track_delete)
+
     clip = groups.add_parser("clip", help="Clip inspection commands")
     clip_sub = clip.add_subparsers(dest="command")
     attach_command(clip_sub, "list", "List clips on a track", cmd_clip_list, lambda p: p.add_argument("track_index", type=int))
@@ -537,6 +681,15 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--name", default=None)
 
     attach_command(clip_sub, "add", "Add a new clip", cmd_clip_add, cfg_clip_add)
+
+    def cfg_clip_move_edges(p):
+        p.add_argument("--uuid", required=True)
+        p.add_argument("--side", required=True, choices=["left", "right"])
+        p.add_argument("--mode", required=True, choices=["diff", "abs"])
+        p.add_argument("--value", required=True, type=int)
+        p.add_argument("--dry-run", action="store_true", default=False)
+
+    attach_command(clip_sub, "move-edges", "Move (trim/expand) clip edges by UUID", cmd_clip_move_edges, cfg_clip_move_edges)
 
     sound = groups.add_parser("sound-source", help="Sound source browsing commands")
     sound_sub = sound.add_subparsers(dest="command")
@@ -579,6 +732,12 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--router-id", type=int, default=None)
 
     attach_command(sound_sub, "load", "Load a sound source onto a track", cmd_sound_source_load, cfg_sound_load)
+
+    def cfg_sound_unload(p):
+        p.add_argument("track_index", type=int)
+        p.add_argument("--dry-run", action="store_true", default=False)
+
+    attach_command(sound_sub, "unload", "Unload sound source from a track (DATA LOSS WARNING)", cmd_sound_source_unload, cfg_sound_unload)
 
     convert = groups.add_parser("convert", help="Tempo and position conversion commands")
     convert_sub = convert.add_subparsers(dest="command")
@@ -677,6 +836,68 @@ def build_parser() -> argparse.ArgumentParser:
         cfg_workflow_song_skeleton,
     )
 
+    editor = groups.add_parser("editor", help="Pattern editor commands")
+    editor_sub = editor.add_subparsers(dest="command")
+    attach_command(editor_sub, "availability", "Check if pattern editor is available", cmd_editor_availability)
+    attach_command(editor_sub, "clip", "Get current clip being edited", cmd_editor_clip)
+    attach_command(editor_sub, "content", "Get notes/chords from editor", cmd_editor_content)
+
+    def cfg_editor_content(p):
+        p.add_argument("--range", dest="range_scope", choices=["all", "clip_region", "viewport"], default="all")
+        p.add_argument("--range-begin", type=int, default=None)
+        p.add_argument("--range-end", type=int, default=None)
+
+    attach_command(editor_sub, "selection", "Get current editor selection", cmd_editor_selection)
+
+    def cfg_editor_selection_range(p):
+        p.add_argument("--range-begin", required=True, type=int)
+        p.add_argument("--range-end", required=True, type=int)
+        p.add_argument("--select-notes", action="store_true", default=False)
+
+    attach_command(editor_sub, "selection-range", "Set selection range in editor", cmd_editor_selection_range, cfg_editor_selection_range)
+
+    def cfg_editor_modify_selection(p):
+        p.add_argument("--mode", required=True, choices=["replace", "modify"])
+        p.add_argument("--notes-to-select-json", default=None)
+        p.add_argument("--notes-to-deselect-json", default=None)
+
+    attach_command(editor_sub, "modify-selection", "Modify note selection in editor", cmd_editor_modify_selection, cfg_editor_modify_selection)
+
+    def cfg_editor_delete_selection(p):
+        p.add_argument("--dry-run", action="store_true", default=False)
+
+    attach_command(editor_sub, "delete-selection", "Delete selected notes in editor", cmd_editor_delete_selection, cfg_editor_delete_selection)
+
+    def cfg_editor_add_notes(p):
+        p.add_argument("--lyric-sentence", default=None)
+        p.add_argument("--lyric", default=None)
+        p.add_argument("--notes-json", default=None)
+        p.add_argument("--offset", type=int, default=0)
+        p.add_argument("--language", default=None)
+
+    attach_command(editor_sub, "add-notes", "Add notes to editor (sentence mode recommended)", cmd_editor_add_notes, cfg_editor_add_notes)
+
+    arrangement = groups.add_parser("arrangement", help="Arrangement view selection and editing commands")
+    arrangement_sub = arrangement.add_subparsers(dest="command")
+
+    def cfg_arrangement_make_selection(p):
+        p.add_argument("--track-begin", required=True, type=int)
+        p.add_argument("--track-end", required=True, type=int)
+        p.add_argument("--tick-begin", required=True, type=int)
+        p.add_argument("--tick-end", required=True, type=int)
+
+    def cfg_arrangement_delete_selection(p):
+        p.add_argument("--dry-run", action="store_true", default=False)
+
+    def cfg_arrangement_move_selection(p):
+        p.add_argument("--target-tick", required=True, type=int)
+        p.add_argument("--target-track-index", type=int, default=None)
+
+    attach_command(arrangement_sub, "get-selection", "Get current arrangement selection range", cmd_arrangement_get_selection)
+    attach_command(arrangement_sub, "make-selection", "Create a new arrangement selection range", cmd_arrangement_make_selection, cfg_arrangement_make_selection)
+    attach_command(arrangement_sub, "delete-selection", "Delete clips in arrangement selection", cmd_arrangement_delete_selection, cfg_arrangement_delete_selection)
+    attach_command(arrangement_sub, "move-selection", "Move arrangement selection to new position", cmd_arrangement_move_selection, cfg_arrangement_move_selection)
+
     return parser
 
 
@@ -737,6 +958,9 @@ def repl_loop(base_args) -> int:
                     "metronome get/set, loop get/set-active/set-range, marker get/seek/move": "Navigation controls",
                     "ui mixer/special-track": "ACE Studio UI visibility",
                     "workflow song-skeleton": "Generate a song skeleton on existing tracks",
+                    "editor availability/clip/content/selection": "Pattern editor inspection",
+                    "editor add-notes/selection-range/modify-selection/delete-selection": "Pattern editor writes",
+                    "arrangement get-selection/make-selection/delete-selection/move-selection": "Arrangement selection and editing",
                 }
             )
             continue

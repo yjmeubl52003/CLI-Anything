@@ -118,6 +118,32 @@ cli-anything-acestudio ui mixer hide
 cli-anything-acestudio ui special-track chord show
 ```
 
+### Workflow
+
+```bash
+cli-anything-acestudio workflow song-skeleton --dry-run --spec-json '{
+  "tempo": [{"pos":0,"value":120}],
+  "timesig": [{"barPos":0,"numerator":4,"denominator":4}],
+  "sections": [
+    {"name":"Intro","bars":4},
+    {"name":"Verse 1","bars":8},
+    {"name":"Chorus 1","bars":8}
+  ],
+  "tracks": [
+    {"role":"lead","track_index":0,"clip_type":"sing","prefix":"Lead"},
+    {"role":"guide","track_index":1,"clip_type":"genericmidi","prefix":"Guide"}
+  ]
+}' --json
+```
+
+This workflow expects existing tracks in the current ACE Studio project. It will:
+
+- replace the current tempo map
+- replace the current time signature map
+- calculate section boundaries by bar count
+- create section clips on the specified existing tracks
+- optionally load sound sources when `sound_source` is present in a track spec
+
 ## JSON Output
 
 Add `--json` to any command for machine-readable output:
@@ -167,6 +193,8 @@ It does not yet implement:
 - `sound-source load` requires `--group` for `singer` and `choir`.
 - `project set-tempo` and `project set-timesig` are full-map replacements and require `--replace-all`.
 - Tempo points must be strictly increasing by `pos`; time signatures must be strictly increasing by `barPos`.
+- `workflow song-skeleton` also replaces tempo and time signatures as part of the workflow.
+- `workflow song-skeleton --dry-run` previews the plan without writing clips or loading sound sources.
 
 ## Running Tests
 

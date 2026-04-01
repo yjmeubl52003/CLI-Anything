@@ -17,6 +17,7 @@ from cli_anything.acestudio.core import sound_source as sound_source_core
 from cli_anything.acestudio.core import track as track_core
 from cli_anything.acestudio.core import transport as transport_core
 from cli_anything.acestudio.core import ui as ui_core
+from cli_anything.acestudio.core import workflow as workflow_core
 from cli_anything.acestudio.mcp_client import (
     ACEStudioMCPClient,
     MCPClientError,
@@ -150,6 +151,16 @@ def _load_json_array(raw: str, label: str) -> list[dict[str, Any]]:
         raise ValidationError(f"{label} must be valid JSON.") from exc
     if not isinstance(parsed, list):
         raise ValidationError(f"{label} must be a JSON array.")
+    return parsed
+
+
+def _load_json_object(raw: str, label: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValidationError(f"{label} must be valid JSON.") from exc
+    if not isinstance(parsed, dict):
+        raise ValidationError(f"{label} must be a JSON object.")
     return parsed
 
 
@@ -382,6 +393,11 @@ def cmd_ui_mixer(args):
 
 def cmd_ui_special_track(args):
     return ui_core.set_special_track_visibility(make_client(args), args.track_name, args.state == "show")
+
+
+def cmd_workflow_song_skeleton(args):
+    spec = _load_json_object(args.spec_json, "--spec-json")
+    return workflow_core.song_skeleton(make_client(args), spec, dry_run=args.dry_run)
 
 
 def add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -646,6 +662,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     attach_command(ui_sub, "special-track", "Show or hide a special track", cmd_ui_special_track, cfg_ui_special_track)
 
+    workflow = groups.add_parser("workflow", help="Higher-level ACE Studio workflows")
+    workflow_sub = workflow.add_subparsers(dest="command")
+
+    def cfg_workflow_song_skeleton(p):
+        p.add_argument("--spec-json", required=True)
+        p.add_argument("--dry-run", action="store_true", default=False)
+
+    attach_command(
+        workflow_sub,
+        "song-skeleton",
+        "Generate a song skeleton on existing tracks",
+        cmd_workflow_song_skeleton,
+        cfg_workflow_song_skeleton,
+    )
+
     return parser
 
 
@@ -705,6 +736,7 @@ def repl_loop(base_args) -> int:
                     "transport play/stop/toggle": "Playback control",
                     "metronome get/set, loop get/set-active/set-range, marker get/seek/move": "Navigation controls",
                     "ui mixer/special-track": "ACE Studio UI visibility",
+                    "workflow song-skeleton": "Generate a song skeleton on existing tracks",
                 }
             )
             continue

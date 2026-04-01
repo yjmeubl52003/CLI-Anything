@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 
 from cli_anything.acestudio.acestudio_cli import build_parser, normalize_global_args
-from cli_anything.acestudio.core import clip, convert, project, sound_source, track, transport, ui
+from cli_anything.acestudio.core import clip, convert, project, sound_source, track, transport, ui, workflow
 from cli_anything.acestudio.mcp_client import ValidationError
 from cli_anything.acestudio.mcp_client import ACEStudioMCPClient
 
@@ -298,6 +298,94 @@ class CoreModuleTests(unittest.TestCase):
         parser = build_parser()
         args = parser.parse_args(["project", "set-timesig", "--signatures-json", '[{"barPos":0,"numerator":4,"denominator":4}]', "--replace-all"])
         self.assertTrue(args.replace_all)
+
+    def test_validate_song_skeleton_requires_core_keys(self):
+        client = DummyClient(self._track_mapping())
+        with self.assertRaises(ValidationError):
+            workflow.validate_song_skeleton_spec({"tempo": []}, client)
+
+    def test_validate_song_skeleton_rejects_missing_track(self):
+        client = DummyClient(self._track_mapping())
+        spec = {
+            "tempo": [{"pos": 0, "value": 120}],
+            "timesig": [{"barPos": 0, "numerator": 4, "denominator": 4}],
+            "sections": [{"name": "Verse", "bars": 8}],
+            "tracks": [{"role": "lead", "track_index": 9, "clip_type": "sing"}],
+        }
+        with self.assertRaises(ValidationError):
+            workflow.validate_song_skeleton_spec(spec, client)
+
+    def test_validate_song_skeleton_rejects_unknown_target_role(self):
+        client = DummyClient(self._track_mapping())
+        spec = {
+            "tempo": [{"pos": 0, "value": 120}],
+            "timesig": [{"barPos": 0, "numerator": 4, "denominator": 4}],
+            "sections": [{"name": "Verse", "bars": 8, "target_roles": ["missing"]}],
+            "tracks": [{"role": "lead", "track_index": 0, "clip_type": "sing"}],
+        }
+        with self.assertRaises(ValidationError):
+            workflow.validate_song_skeleton_spec(spec, client)
+
+    def test_song_skeleton_dry_run_builds_clip_plan(self):
+        mapping = self._track_mapping()
+        mapping["get_tempo_automation"] = {"points": [{"pos": 0, "value": 120, "bend": 0}], "pointCount": 1}
+        mapping["get_timesignature_list"] = {"signatures": [{"barPos": 0, "numerator": 4, "denominator": 4}], "signatureCount": 1}
+        mapping["set_tempo_automation"] = {"ok": True}
+        mapping["set_timesignature_list"] = {"ok": True}
+        mapping["measure_pos_to_tick"] = lambda args: {"tick": args["barPos"] * 1920 + args["tickOffset"]}
+        client = DummyClient(mapping)
+        spec = {
+            "tempo": [{"pos": 0, "value": 120}],
+            "timesig": [{"barPos": 0, "numerator": 4, "denominator": 4}],
+            "sections": [
+                {"name": "Intro", "bars": 4},
+                {"name": "Verse 1", "bars": 8, "target_roles": ["lead"]},
+            ],
+            "tracks": [
+                {"role": "lead", "track_index": 0, "clip_type": "sing", "prefix": "Lead"},
+            ],
+        }
+        result = workflow.song_skeleton(client, spec, dry_run=True)
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["summary"]["clip_count"], 2)
+        self.assertEqual(result["clip_plan"][0]["name"], "Intro Lead")
+        self.assertEqual(result["clip_plan"][1]["pos"], 7680)
+
+    def test_song_skeleton_executes_sound_source_once_per_track(self):
+        mapping = self._track_mapping()
+        mapping["get_tempo_automation"] = {"points": [{"pos": 0, "value": 120, "bend": 0}], "pointCount": 1}
+        mapping["get_timesignature_list"] = {"signatures": [{"barPos": 0, "numerator": 4, "denominator": 4}], "signatureCount": 1}
+        mapping["set_tempo_automation"] = {"ok": True}
+        mapping["set_timesignature_list"] = {"ok": True}
+        mapping["measure_pos_to_tick"] = lambda args: {"tick": args["barPos"] * 1920 + args["tickOffset"]}
+        mapping["get_content_track_meta_settings"] = {"trackType": "Sing"}
+        mapping["load_new_sound_source_on_track"] = {"ok": True}
+        mapping["get_content_track_clip_basic_info_list"] = {"clipCount": 0, "clips": []}
+        mapping["add_new_clip"] = {"clipName": "ok"}
+        client = DummyClient(mapping)
+        spec = {
+            "tempo": [{"pos": 0, "value": 120}],
+            "timesig": [{"barPos": 0, "numerator": 4, "denominator": 4}],
+            "sections": [{"name": "Verse", "bars": 8}],
+            "tracks": [
+                {
+                    "role": "lead",
+                    "track_index": 0,
+                    "clip_type": "sing",
+                    "prefix": "Lead",
+                    "sound_source": {"kind": "singer", "id": 1, "group": "official"},
+                }
+            ],
+        }
+        result = workflow.song_skeleton(client, spec, dry_run=False)
+        self.assertEqual(result["summary"]["sound_source_load_count"], 1)
+        calls = [name for name, _ in client.calls]
+        self.assertEqual(calls.count("load_new_sound_source_on_track"), 1)
+
+    def test_parser_accepts_workflow_song_skeleton(self):
+        parser = build_parser()
+        args = parser.parse_args(["workflow", "song-skeleton", "--spec-json", '{"tempo":[],"timesig":[],"sections":[],"tracks":[]}', "--dry-run"])
+        self.assertTrue(args.dry_run)
 
 
 if __name__ == "__main__":
